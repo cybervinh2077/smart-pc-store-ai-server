@@ -35,6 +35,19 @@ else:
     DATA_FILE = "data.json"
     PRICE_CHANGES_FILE = "pricechanges.json"
 
+# Đảm bảo các file tồn tại để không gây lỗi khi khởi động
+def init_local_cache():
+    for f_path in [DATA_FILE, PRICE_CHANGES_FILE]:
+        if not os.path.exists(f_path):
+            try:
+                os.makedirs(os.path.dirname(f_path), exist_ok=True) if os.path.dirname(f_path) else None
+                with open(f_path, "w", encoding="utf-8") as f:
+                    json.dump([], f)
+            except:
+                pass
+
+init_local_cache()
+
 @app.on_event("startup")
 async def startup_event():
     """

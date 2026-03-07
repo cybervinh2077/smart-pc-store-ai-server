@@ -3,18 +3,26 @@ import os
 import numpy as np
 from datetime import datetime, timedelta
 
-PRICE_CHANGES_FILE = "pricechanges.json"
+def get_price_changes_file():
+    if os.getenv("VERCEL"):
+        return "/tmp/pricechanges.json"
+    return "pricechanges.json"
 
 def predict_future_prices(product_id, days_to_forecast):
     """
     Dự báo giá tương lai bằng chuỗi Markov dựa trên lịch sử giá.
     Trạng thái Markov ở đây được xác định là tỷ lệ thay đổi giá (price change percentage).
     """
-    if not os.path.exists(PRICE_CHANGES_FILE):
-        return {"error": "File pricechanges.json không tồn tại"}
+    file_path = get_price_changes_file()
+    if not os.path.exists(file_path):
+        # Trả về lỗi thân thiện thay vì làm hỏng app
+        return {"error": f"Dữ liệu lịch sử ({file_path}) chưa sẵn sàng. Vui lòng thử lại sau vài giây."}
 
-    with open(PRICE_CHANGES_FILE, "r", encoding="utf-8") as f:
-        all_data = json.load(f)
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            all_data = json.load(f)
+    except Exception as e:
+        return {"error": f"Lỗi khi đọc dữ liệu lịch sử: {str(e)}"}
 
     # Lọc lịch sử giá của sản phẩm cụ thể
     product_history = [
