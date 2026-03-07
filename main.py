@@ -5,6 +5,7 @@ import asyncio
 import re
 from typing import List, Optional
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import google.generativeai as genai
 from dotenv import load_dotenv
@@ -15,6 +16,15 @@ from markov_predictor import predict_future_prices
 load_dotenv()
 
 app = FastAPI(title="smart-pc-store-ai-server")
+
+# Thêm cấu hình CORS để bypass
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Cấu hình Supabase
 SUPABASE_URL = os.getenv("SUPABASE_URL")
