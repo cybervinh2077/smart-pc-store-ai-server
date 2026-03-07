@@ -1,11 +1,14 @@
 import os
 import json
 import httpx
+import asyncio
+import re
 from typing import List, Optional
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import google.generativeai as genai
 from dotenv import load_dotenv
+from markov_predictor import predict_future_prices
 
 # Load biến môi trường từ file .env
 load_dotenv()
@@ -14,13 +17,23 @@ app = FastAPI(title="Smart PC Store AI Server")
 
 # Đường dẫn file dữ liệu linh kiện
 DATA_FILE = "data.json"
+PRICE_CHANGES_FILE = "pricechanges.json"
 
 @app.on_event("startup")
 async def startup_event():
     """
     Sự kiện chạy khi server bắt đầu khởi động:
-    Gửi request lấy dữ liệu sản phẩm từ localhost:8080 và lưu vào data.json
+    1. Lấy dữ liệu sản phẩm lần đầu ngay lập tức.
+    2. Khởi chạy tác vụ ngầm cập nhật mỗi 3 phút.
     """
+    # Lấy dữ liệu lần đầu tiên ngay lập tức
+    await fetch_products_data()
+    
+    # Khởi chạy tác vụ chạy ngầm cập nhật định kỳ mỗi 3 phút (180 giây)
+    asyncio.create_task(periodic_fetch_data())
+
+async def fetch_products_data():
+    """Hàm thực hiện fetch dữ liệu sản phẩm và lưu vào data.json"""
     url = "http://localhost:8080/smart_pc_store_war/products"
     payload = {
         "username": "tester",
@@ -31,27 +44,72 @@ async def startup_event():
     
     try:
         async with httpx.AsyncClient() as client:
-            # Người dùng yêu cầu 'gửi lệnh get với body'
-            # Lưu ý: Theo tiêu chuẩn HTTP, GET có body không được khuyến khích, 
-            # nhưng httpx vẫn hỗ trợ nếu server yêu cầu. 
-            # Nếu server của bạn thực chất dùng POST, hãy đổi sang client.post.
-            response = await client.request("GET", url, json=payload, timeout=10.0)
+            response = await client.request("GET", url, json=payload, timeout=15.0)
             
             if response.status_code == 200:
-                data = response.json()
+                products = response.json()
                 with open(DATA_FILE, "w", encoding="utf-8") as f:
-                    json.dump(data, f, ensure_ascii=False, indent=4)
+                    json.dump(products, f, ensure_ascii=False, indent=4)
                 print(f"SUCCESS: Đã cập nhật dữ liệu vào {DATA_FILE}")
+                
+                # Sau khi có dữ liệu sản phẩm, tiếp tục lấy lịch sử giá cho từng sản phẩm
+                await fetch_price_histories(products)
             else:
-                print(f"WARNING: Không thể lấy dữ liệu. Status code: {response.status_code}")
-                # Tạo file rỗng nếu thất bại để tránh lỗi đọc file sau này
+                print(f"WARNING: Không thể lấy dữ liệu sản phẩm. Status code: {response.status_code}")
                 if not os.path.exists(DATA_FILE):
                     with open(DATA_FILE, "w") as f: json.dump([], f)
-                    
     except Exception as e:
         print(f"ERROR khi lấy dữ liệu sản phẩm: {str(e)}")
         if not os.path.exists(DATA_FILE):
             with open(DATA_FILE, "w") as f: json.dump([], f)
+
+async def fetch_price_histories(products):
+    """Lấy lịch sử thay đổi giá cho toàn bộ danh sách sản phẩm"""
+    print("INFO: Đang bắt đầu lấy lịch sử giá cho các sản phẩm...")
+    all_price_changes = []
+    
+    async with httpx.AsyncClient() as client:
+        for p in products:
+            # Lấy supplierId và id (là productId) từ object sản phẩm dựa trên mẫu bạn cung cấp
+            s_id = p.get("supplierId")
+            p_id = p.get("id") # Bạn đính chính: productId thực chất là id
+            p_name = p.get("productName")
+            
+            if s_id is not None and p_id is not None:
+                # URL: .../history?productId=yyy&supplierId=xxx
+                history_url = f"http://localhost:8080/smart_pc_store_war/supplier-quotations/history?productId={p_id}&supplierId={s_id}"
+                try:
+                    resp = await client.get(history_url, timeout=10.0)
+                    if resp.status_code == 200:
+                        history_data = resp.json()
+                        if isinstance(history_data, list):
+                            for record in history_data:
+                                # Trích xuất các trường: productId, productName, supplierId, importPrice, effectiveDate
+                                change_entry = {
+                                    "productId": p_id,
+                                    "productName": p_name,
+                                    "supplierId": s_id,
+                                    "importPrice": record.get("importPrice"),
+                                    "effectiveDate": record.get("effectiveDate")
+                                }
+                                all_price_changes.append(change_entry)
+                except Exception as e:
+                    print(f"ERROR khi lấy lịch sử giá cho Product {p_id}: {str(e)}")
+
+    # Lưu toàn bộ dữ liệu vào pricechanges.json
+    try:
+        with open(PRICE_CHANGES_FILE, "w", encoding="utf-8") as f:
+            json.dump(all_price_changes, f, ensure_ascii=False, indent=4)
+        print(f"SUCCESS: Đã lưu {len(all_price_changes)} bản ghi vào {PRICE_CHANGES_FILE}")
+    except Exception as e:
+        print(f"ERROR khi lưu file {PRICE_CHANGES_FILE}: {str(e)}")
+
+async def periodic_fetch_data():
+    """Vòng lặp chạy ngầm cập nhật dữ liệu mỗi 3 phút"""
+    while True:
+        await asyncio.sleep(180) # Đợi 3 phút
+        print("INFO: Bắt đầu cập nhật dữ liệu sản phẩm định kỳ (mỗi 3 phút)...")
+        await fetch_products_data()
 
 # Cấu hình Gemini Client
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
@@ -103,20 +161,76 @@ class ChatRequest(BaseModel):
     messages: List[Message]
     # Bỏ model khỏi request để không cần khai báo
 
+class ForecastRequest(BaseModel):
+    product_id: str
+    days: Optional[int] = 7 # Mặc định là 7 ngày nếu để trống
+
 # Model cho dữ liệu đầu ra (JSON) - Giữ nguyên interface cũ để tránh break client
 class ChatResponse(BaseModel):
     id: str
     message: Message
     suggested_products: List[dict] = [] # Tách sản phẩm JSON ra ngoài
+    past: Optional[List[dict]] = None   # Lịch sử giá cho dự báo Markov
+    future: Optional[List[dict]] = None # Dự báo giá tương lai
     usage: dict
 
 @app.get("/")
 async def root():
     return {"message": "Smart PC Store AI Server is running with Gemini!"}
 
+@app.post("/forecast")
+async def get_markov_forecast(request: ForecastRequest):
+    """
+    Route riêng biệt để dự báo giá sản phẩm bằng chuỗi Markov.
+    Sử dụng phương thức POST.
+    """
+    p_id = request.product_id
+    days = request.days if request.days is not None else 7
+    
+    print(f"DEBUG: Nhận yêu cầu dự báo Markov (POST) cho Product ID: {p_id} trong {days} ngày.")
+    prediction = predict_future_prices(p_id, days)
+    
+    if "error" in prediction:
+        print(f"DEBUG: Lỗi dự báo: {prediction['error']}")
+        raise HTTPException(status_code=404, detail=prediction["error"])
+    return prediction
+
 @app.post("/chat", response_model=ChatResponse)
 async def chat_endpoint(request: ChatRequest):
     try:
+        last_message = request.messages[-1].content
+        
+        # Kiểm tra nếu request là yêu cầu dự báo Markov: ftr-a-b
+        match = re.match(r"^ftr-(\d+)-(\d+)$", last_message.strip())
+        if match:
+            product_id = match.group(1)
+            days = int(match.group(2))
+            
+            prediction = predict_future_prices(product_id, days)
+            
+            if "error" in prediction:
+                return ChatResponse(
+                    id="markov-error",
+                    message=Message(role="assistant", content=prediction["error"]),
+                    suggested_products=[],
+                    usage={"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+                )
+            
+            # Trả về kết quả dự báo
+            content = f"Dự báo giá cho sản phẩm ID {product_id} trong {days} ngày tới."
+            return ChatResponse(
+                id="markov-prediction",
+                message=Message(role="assistant", content=content),
+                suggested_products=[],
+                past=prediction["past"],
+                future=prediction["future"],
+                usage={
+                    "prompt_tokens": 0, 
+                    "completion_tokens": 0, 
+                    "total_tokens": 0
+                }
+            )
+
         # Đọc dữ liệu sản phẩm từ file data.json
         products_context = ""
         try:

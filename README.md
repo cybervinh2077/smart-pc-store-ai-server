@@ -5,7 +5,16 @@ Hệ thống Server API AI Chatbot chuyên gia phân tích thị trường linh 
 ## Tính năng
 - AI đóng vai trò Chuyên gia phân tích thị trường công nghệ (CPU, GPU, RAM, v.v.).
 - **Gợi ý sản phẩm thông minh:** AI tự động đọc dữ liệu từ `data.json` để đưa ra các gợi ý sản phẩm thực tế kèm theo mã JSON của sản phẩm đó dựa trên câu hỏi của người dùng.
-- Tự động lấy dữ liệu sản phẩm từ `http://localhost:8080/smart_pc_store_war/products` mỗi khi khởi động server và lưu vào `data.json`.
+- **Dự báo giá Markov:** 
+    - Lệnh `ftr-a-b` (trong chat): Dự báo giá sản phẩm a cho b ngày tiếp theo.
+    - **Endpoint riêng biệt:** `POST /forecast` để lấy dữ liệu dự báo.
+        - Body: `{"product_id": "1", "days": 7}`
+        - Nếu `days` để trống, mặc định sẽ là 7 ngày.
+- **Tự động cập nhật dữ liệu định kỳ:** 
+    - Lấy dữ liệu lần đầu ngay khi server khởi động.
+    - Tự động lấy danh sách sản phẩm và **lịch sử thay đổi giá** (từ URL `supplier-quotations/history`) cho từng sản phẩm.
+    - Dữ liệu sản phẩm được lưu vào `data.json`, lịch sử giá được lưu vào `pricechanges.json`.
+    - Tự động cập nhật định kỳ mỗi **3 phút**.
 - Tự động áp dụng System Prompt để định hình phong cách trả lời chuyên nghiệp (không emoji).
 - API nhận và trả dữ liệu dạng JSON.
 - Tích hợp Google Gemini AI (Free tier).

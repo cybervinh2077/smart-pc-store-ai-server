@@ -120,6 +120,7 @@ venv.bak/
 
 # Project data
 data.json
+pricechanges.json
 
 # Spyder project settings
 .spyderproject
