@@ -27,8 +27,13 @@ else:
     supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # Đường dẫn file dữ liệu linh kiện (vẫn giữ để làm cache hoặc fallback nếu cần)
-DATA_FILE = "data.json"
-PRICE_CHANGES_FILE = "pricechanges.json"
+# Lưu ý: Trên Vercel, thư mục /tmp là nơi duy nhất có quyền ghi
+if os.getenv("VERCEL"):
+    DATA_FILE = "/tmp/data.json"
+    PRICE_CHANGES_FILE = "/tmp/pricechanges.json"
+else:
+    DATA_FILE = "data.json"
+    PRICE_CHANGES_FILE = "pricechanges.json"
 
 @app.on_event("startup")
 async def startup_event():

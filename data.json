@@ -75,5 +75,16 @@
         "currentPrice": 1000000.0,
         "status": true,
         "quantity": 100
+    },
+    {
+        "id": "8c6bed8f-0a5b-49a5-aefe-20be4a32ebb8",
+        "productName": "GGGG",
+        "supplierId": "edf67e1a-d2d3-4be7-8034-985bd2856739",
+        "categoryId": "4ccdaa2c-4efd-49c8-a5cd-4960fbe83138",
+        "description": "GGGG",
+        "imageUrl": null,
+        "currentPrice": 1000.0,
+        "status": true,
+        "quantity": 1000
     }
 ]
