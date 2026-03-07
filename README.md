@@ -1,4 +1,4 @@
-# Smart PC Store AI Server
+# smart-pc-store-ai-server
 
 Hệ thống Server API AI Chatbot chuyên gia phân tích thị trường linh kiện máy tính, sử dụng Google Gemini API.
 
@@ -25,26 +25,31 @@ Hệ thống Server API AI Chatbot chuyên gia phân tích thị trường linh 
 1. **Clone repository:**
    ```bash
    git clone <repository_url>
-   cd Smart-PC-Store-AI-Server
+   cd smart-pc-store-ai-server
    ```
 
-2. **Cài đặt môi trường ảo (khuyến nghị):**
+2. **Cài đặt môi trường ảo và dependencies:**
    ```bash
    python -m venv venv
    source venv/bin/activate  # Trên Windows dùng: venv\Scripts\activate
-   ```
-
-3. **Cài đặt dependencies:**
-   ```bash
    pip install -r requirements.txt
    ```
 
-4. **Cấu hình môi trường:**
+3. **Cấu hình môi trường:**
    - Tạo file `.env` từ `.env.example`:
      ```bash
      cp .env.example .env
      ```
-   - Điền `GEMINI_API_KEY` của bạn vào file `.env`.
+   - Điền đầy đủ các thông tin:
+     - `SUPABASE_URL`: URL dự án Supabase của bạn.
+     - `SUPABASE_KEY`: Service Role Key hoặc Anon Key của Supabase.
+     - `GEMINI_API_KEY`: API Key từ Google AI Studio.
+
+## Cấu trúc Database (Supabase)
+Server mong đợi các bảng sau tồn tại trong Supabase:
+- **`products`**: Chứa thông tin sản phẩm linh kiện.
+- **`supplier_quotation_history`**: Chứa lịch sử thay đổi giá của các nhà cung cấp.
+  - Các trường cần thiết: `product_id`, `product_name`, `supplier_id`, `import_price`, `effective_date`.
 
 ## Chạy Server
 ```bash

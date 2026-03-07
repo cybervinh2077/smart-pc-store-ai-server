@@ -8,14 +8,25 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import google.generativeai as genai
 from dotenv import load_dotenv
+from supabase import create_client, Client
 from markov_predictor import predict_future_prices
 
 # Load biến môi trường từ file .env
 load_dotenv()
 
-app = FastAPI(title="Smart PC Store AI Server")
+app = FastAPI(title="smart-pc-store-ai-server")
 
-# Đường dẫn file dữ liệu linh kiện
+# Cấu hình Supabase
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+
+if not SUPABASE_URL or not SUPABASE_KEY:
+    print("CẢNH BÁO: SUPABASE_URL hoặc SUPABASE_KEY chưa được thiết lập!")
+    supabase: Client = None
+else:
+    supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+# Đường dẫn file dữ liệu linh kiện (vẫn giữ để làm cache hoặc fallback nếu cần)
 DATA_FILE = "data.json"
 PRICE_CHANGES_FILE = "pricechanges.json"
 
@@ -23,93 +34,67 @@ PRICE_CHANGES_FILE = "pricechanges.json"
 async def startup_event():
     """
     Sự kiện chạy khi server bắt đầu khởi động:
-    1. Lấy dữ liệu sản phẩm lần đầu ngay lập tức.
-    2. Khởi chạy tác vụ ngầm cập nhật mỗi 3 phút.
+    1. Lấy dữ liệu sản phẩm từ Supabase lần đầu.
+    2. Khởi chạy tác vụ ngầm cập nhật mỗi 5 phút.
     """
-    # Lấy dữ liệu lần đầu tiên ngay lập tức
-    await fetch_products_data()
-    
-    # Khởi chạy tác vụ chạy ngầm cập nhật định kỳ mỗi 3 phút (180 giây)
+    await fetch_data_from_supabase()
     asyncio.create_task(periodic_fetch_data())
 
-async def fetch_products_data():
-    """Hàm thực hiện fetch dữ liệu sản phẩm và lưu vào data.json"""
-    url = "http://localhost:8080/smart_pc_store_war/products"
-    payload = {
-        "username": "tester",
-        "password": "Abc123@"
-    }
-    
-    print(f"INFO: Đang tải dữ liệu sản phẩm từ {url}...")
+async def fetch_data_from_supabase():
+    """Hàm lấy dữ liệu từ Supabase và lưu vào file local để làm cache/context"""
+    if not supabase:
+        print("ERROR: Supabase client chưa được khởi tạo.")
+        return
+
+    print("INFO: Đang tải dữ liệu từ Supabase...")
     
     try:
-        async with httpx.AsyncClient() as client:
-            response = await client.request("GET", url, json=payload, timeout=15.0)
-            
-            if response.status_code == 200:
-                products = response.json()
-                with open(DATA_FILE, "w", encoding="utf-8") as f:
-                    json.dump(products, f, ensure_ascii=False, indent=4)
-                print(f"SUCCESS: Đã cập nhật dữ liệu vào {DATA_FILE}")
-                
-                # Sau khi có dữ liệu sản phẩm, tiếp tục lấy lịch sử giá cho từng sản phẩm
-                await fetch_price_histories(products)
-            else:
-                print(f"WARNING: Không thể lấy dữ liệu sản phẩm. Status code: {response.status_code}")
-                if not os.path.exists(DATA_FILE):
-                    with open(DATA_FILE, "w") as f: json.dump([], f)
-    except Exception as e:
-        print(f"ERROR khi lấy dữ liệu sản phẩm: {str(e)}")
-        if not os.path.exists(DATA_FILE):
-            with open(DATA_FILE, "w") as f: json.dump([], f)
+        # 1. Lấy dữ liệu sản phẩm (bảng 'Products')
+        prod_resp = supabase.table("Products").select("*").execute()
+        products = prod_resp.data
+        
+        # Tạo map productId -> productName để tra cứu nhanh cho lịch sử giá
+        # Dùng cột 'id' chính xác từ bảng Products để làm khóa
+        product_names_map = {p.get("id"): p.get("productName") or p.get("name") for p in products}
+        
+        with open(DATA_FILE, "w", encoding="utf-8") as f:
+            json.dump(products, f, ensure_ascii=False, indent=4)
+        print(f"SUCCESS: Đã cập nhật {len(products)} sản phẩm từ Supabase (bảng Products, lấy cột 'id' làm khóa chính).")
 
-async def fetch_price_histories(products):
-    """Lấy lịch sử thay đổi giá cho toàn bộ danh sách sản phẩm"""
-    print("INFO: Đang bắt đầu lấy lịch sử giá cho các sản phẩm...")
-    all_price_changes = []
-    
-    async with httpx.AsyncClient() as client:
-        for p in products:
-            # Lấy supplierId và id (là productId) từ object sản phẩm dựa trên mẫu bạn cung cấp
-            s_id = p.get("supplierId")
-            p_id = p.get("id") # Bạn đính chính: productId thực chất là id
-            p_name = p.get("productName")
-            
-            if s_id is not None and p_id is not None:
-                # URL: .../history?productId=yyy&supplierId=xxx
-                history_url = f"http://localhost:8080/smart_pc_store_war/supplier-quotations/history?productId={p_id}&supplierId={s_id}"
-                try:
-                    resp = await client.get(history_url, timeout=10.0)
-                    if resp.status_code == 200:
-                        history_data = resp.json()
-                        if isinstance(history_data, list):
-                            for record in history_data:
-                                # Trích xuất các trường: productId, productName, supplierId, importPrice, effectiveDate
-                                change_entry = {
-                                    "productId": p_id,
-                                    "productName": p_name,
-                                    "supplierId": s_id,
-                                    "importPrice": record.get("importPrice"),
-                                    "effectiveDate": record.get("effectiveDate")
-                                }
-                                all_price_changes.append(change_entry)
-                except Exception as e:
-                    print(f"ERROR khi lấy lịch sử giá cho Product {p_id}: {str(e)}")
+        # 2. Lấy lịch sử giá (bảng 'SupplierPriceHistories')
+        try:
+            # Lấy các cột: id, supplierId, productId, importPrice và effectiveDate
+            hist_resp = supabase.table("SupplierPriceHistories").select("id, supplierId, productId, importPrice, effectiveDate").execute()
+            history = hist_resp.data
+        except Exception as e_hist:
+            print(f"WARNING: Không thể lấy dữ liệu từ 'SupplierPriceHistories' với cột effectiveDate, thử cấu trúc mặc định...")
+            hist_resp = supabase.table("SupplierPriceHistories").select("*").execute()
+            history = hist_resp.data
+        
+        # Format lại data history khớp với cấu trúc thực tế của bạn
+        formatted_history = []
+        for h in history:
+            p_id = h.get("productId")
+            formatted_history.append({
+                "productId": p_id,
+                "productName": product_names_map.get(p_id, "Sản phẩm không xác định"),
+                "supplierId": h.get("supplierId"),
+                "importPrice": h.get("importPrice"),
+                "effectiveDate": h.get("effectiveDate") or h.get("created_at")
+            })
 
-    # Lưu toàn bộ dữ liệu vào pricechanges.json
-    try:
         with open(PRICE_CHANGES_FILE, "w", encoding="utf-8") as f:
-            json.dump(all_price_changes, f, ensure_ascii=False, indent=4)
-        print(f"SUCCESS: Đã lưu {len(all_price_changes)} bản ghi vào {PRICE_CHANGES_FILE}")
+            json.dump(formatted_history, f, ensure_ascii=False, indent=4)
+        print(f"SUCCESS: Đã cập nhật {len(formatted_history)} bản ghi lịch sử giá từ Supabase.")
+
     except Exception as e:
-        print(f"ERROR khi lưu file {PRICE_CHANGES_FILE}: {str(e)}")
+        print(f"ERROR khi lấy dữ liệu từ Supabase: {str(e)}")
 
 async def periodic_fetch_data():
-    """Vòng lặp chạy ngầm cập nhật dữ liệu mỗi 3 phút"""
+    """Vòng lặp chạy ngầm cập nhật dữ liệu mỗi 5 phút"""
     while True:
-        await asyncio.sleep(180) # Đợi 3 phút
-        print("INFO: Bắt đầu cập nhật dữ liệu sản phẩm định kỳ (mỗi 3 phút)...")
-        await fetch_products_data()
+        await asyncio.sleep(300) 
+        await fetch_data_from_supabase()
 
 # Cấu hình Gemini Client
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")

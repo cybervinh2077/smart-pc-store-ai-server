@@ -6,3 +6,6 @@ pydantic
 google-generativeai
 httpx
 numpy
+supabase
+requests
+psycopg2-binary
