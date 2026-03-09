@@ -37,8 +37,8 @@ else:
     supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # Đường dẫn file dữ liệu linh kiện (vẫn giữ để làm cache hoặc fallback nếu cần)
-# Lưu ý: Trên Vercel, thư mục /tmp là nơi duy nhất có quyền ghi
-if os.getenv("VERCEL"):
+# Lưu ý: Trên Vercel hoặc Render, thư mục /tmp là nơi duy nhất có quyền ghi nhanh
+if os.getenv("VERCEL") or os.getenv("RENDER"):
     DATA_FILE = "/tmp/data.json"
     PRICE_CHANGES_FILE = "/tmp/pricechanges.json"
 else:
@@ -89,27 +89,58 @@ async def fetch_data_from_supabase():
             json.dump(products, f, ensure_ascii=False, indent=4)
         print(f"SUCCESS: Đã cập nhật {len(products)} sản phẩm từ Supabase (bảng Products, lấy cột 'id' làm khóa chính).")
 
-        # 2. Lấy lịch sử giá (bảng 'SupplierPriceHistories')
+        # 2. Lấy lịch sử giá từ bảng 'PurchaseOrders' và 'PurchaseOrderItems'
         try:
-            # Lấy các cột: id, supplierId, productId, importPrice và effectiveDate
-            hist_resp = supabase.table("SupplierPriceHistories").select("id, supplierId, productId, importPrice, effectiveDate").execute()
+            # Lấy thông tin từ PurchaseOrderItems kết hợp với PurchaseOrders (để lấy supplierId và orderDate)
+            # Supabase (PostgREST) hỗ trợ lấy thông tin quan hệ bảng (nếu có foreign key)
+            # Giả định PurchaseOrderItems có cột purchaseOrderId liên kết với PurchaseOrders(id)
+            query = "productId, unitPrice, PurchaseOrders(supplierId, orderDate)"
+            hist_resp = supabase.table("PurchaseOrderItems").select(query).execute()
             history = hist_resp.data
         except Exception as e_hist:
-            print(f"WARNING: Không thể lấy dữ liệu từ 'SupplierPriceHistories' với cột effectiveDate, thử cấu trúc mặc định...")
-            hist_resp = supabase.table("SupplierPriceHistories").select("*").execute()
-            history = hist_resp.data
+            print(f"WARNING: Lỗi khi lấy dữ liệu kết hợp PurchaseOrderItems và PurchaseOrders: {str(e_hist)}")
+            # Fallback: Lấy riêng lẻ nếu không JOIN được tự động
+            try:
+                items_resp = supabase.table("PurchaseOrderItems").select("*").execute()
+                items = items_resp.data
+                orders_resp = supabase.table("PurchaseOrders").select("*").execute()
+                orders = {o["id"]: o for o in orders_resp.data}
+                
+                history = []
+                for item in items:
+                    order = orders.get(item.get("purchaseOrderId"), {})
+                    history.append({
+                        "productId": item.get("productId"),
+                        "unitPrice": item.get("unitPrice") or item.get("importPrice"),
+                        "PurchaseOrders": {
+                            "supplierId": order.get("supplierId"),
+                            "orderDate": order.get("orderDate") or order.get("createdAt") or order.get("created_at")
+                        }
+                    })
+            except Exception as e_fallback:
+                print(f"ERROR: Không thể lấy dữ liệu lịch sử giá từ PurchaseOrders/Items: {str(e_fallback)}")
+                history = []
         
-        # Format lại data history khớp với cấu trúc thực tế của bạn
+        # Format lại data history khớp với cấu trúc pricechanges.json
         formatted_history = []
         for h in history:
             p_id = h.get("productId")
-            formatted_history.append({
-                "productId": p_id,
-                "productName": product_names_map.get(p_id, "Sản phẩm không xác định"),
-                "supplierId": h.get("supplierId"),
-                "importPrice": h.get("importPrice"),
-                "effectiveDate": h.get("effectiveDate") or h.get("created_at")
-            })
+            order_info = h.get("PurchaseOrders") or {}
+            
+            # importPrice có thể nằm ở 'unitPrice' (tên cột hay dùng cho Items) hoặc 'importPrice'
+            price = h.get("unitPrice") or h.get("importPrice")
+            
+            # effectiveDate lấy từ orderDate của PurchaseOrders
+            date = order_info.get("orderDate") or order_info.get("createdAt") or order_info.get("created_at")
+            
+            if p_id and price and date:
+                formatted_history.append({
+                    "productId": p_id,
+                    "productName": product_names_map.get(p_id, "Sản phẩm không xác định"),
+                    "supplierId": order_info.get("supplierId"),
+                    "importPrice": float(price),
+                    "effectiveDate": date
+                })
 
         with open(PRICE_CHANGES_FILE, "w", encoding="utf-8") as f:
             json.dump(formatted_history, f, ensure_ascii=False, indent=4)

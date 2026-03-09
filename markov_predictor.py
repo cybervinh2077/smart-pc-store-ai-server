@@ -4,7 +4,7 @@ import numpy as np
 from datetime import datetime, timedelta
 
 def get_price_changes_file():
-    if os.getenv("VERCEL"):
+    if os.getenv("VERCEL") or os.getenv("RENDER"):
         return "/tmp/pricechanges.json"
     return "pricechanges.json"
 

@@ -9,3 +9,4 @@ numpy
 supabase
 requests
 psycopg2-binary
+gunicorn
