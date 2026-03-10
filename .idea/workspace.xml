@@ -6,10 +6,7 @@
   <component name="ChangeListManager">
     <list default="true" id="20590b1c-ee09-4a94-8c15-1d2544e69d05" name="Changes" comment="">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/main.py" beforeDir="false" afterPath="$PROJECT_DIR$/main.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/markov_predictor.py" beforeDir="false" afterPath="$PROJECT_DIR$/markov_predictor.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/requirements.txt" beforeDir="false" afterPath="$PROJECT_DIR$/requirements.txt" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/vercel.json" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/data.json" beforeDir="false" afterPath="$PROJECT_DIR$/data.json" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -89,6 +86,7 @@
       <workItem from="1772694348261" duration="11835000" />
       <workItem from="1772887963552" duration="6138000" />
       <workItem from="1773024483742" duration="727000" />
+      <workItem from="1773147526996" duration="702000" />
     </task>
     <servers />
   </component>
