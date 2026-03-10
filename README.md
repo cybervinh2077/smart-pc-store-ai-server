@@ -1,6 +1,6 @@
 # smart-pc-store-ai-server
 
-Hệ thống Server API AI Chatbot chuyên gia phân tích thị trường linh kiện máy tính, sử dụng Google Gemini API.
+Hệ thống Server API AI Chatbot chuyên gia phân tích thị trường linh kiện máy tính, sử dụng FPT Cloud AI API.
 
 ## Tính năng
 - AI đóng vai trò Chuyên gia phân tích thị trường công nghệ (CPU, GPU, RAM, v.v.).
@@ -17,7 +17,7 @@ Hệ thống Server API AI Chatbot chuyên gia phân tích thị trường linh 
     - Tự động cập nhật định kỳ mỗi **3 phút**.
 - Tự động áp dụng System Prompt để định hình phong cách trả lời chuyên nghiệp (không emoji).
 - API nhận và trả dữ liệu dạng JSON.
-- Tích hợp Google Gemini AI (Free tier).
+- Tích hợp FPT Cloud AI (OpenAI-compatible).
 - Sử dụng FastAPI để đạt hiệu năng cao.
 
 ## Cài đặt
@@ -43,7 +43,9 @@ Hệ thống Server API AI Chatbot chuyên gia phân tích thị trường linh 
    - Điền đầy đủ các thông tin:
      - `SUPABASE_URL`: URL dự án Supabase của bạn.
      - `SUPABASE_KEY`: Service Role Key hoặc Anon Key của Supabase.
-     - `GEMINI_API_KEY`: API Key từ Google AI Studio.
+     - `FPT_AI_API_KEY`: API Key từ FPT Cloud AI Marketplace.
+     - `FPT_AI_BASE_URL`: https://mkp-api.fptcloud.com
+     - `FPT_AI_MODEL`: SaoLa-Llama3.1-planner (hoặc model khác được hỗ trợ).
 
 ## Cấu trúc Database (Supabase)
 Server mong đợi các bảng sau tồn tại trong Supabase:
@@ -58,15 +60,7 @@ python main.py
 Server sẽ chạy mặc định tại `http://localhost:8000`.
 
 ## Các Model hỗ trợ
-Để xem danh sách đầy đủ các model mà Gemini API hỗ trợ trong tài khoản của bạn, hãy chạy script:
-```bash
-python list_models.py
-```
-
-Các model phổ biến thường dùng:
-- `gemini-2.5-flash`: (Đã khóa cứng) Phiên bản model mới nhất theo cấu hình của bạn.
-
-Hệ thống đã được thiết lập để luôn sử dụng `gemini-2.5-flash`, bạn không cần truyền tham số `model` trong request body nữa.
+Hệ thống sử dụng các model Large Language Model (LLM) từ FPT Cloud AI. Mặc định sử dụng `SaoLa-Llama3.1-planner`.
 
 ## API Documentation
 Sau khi chạy server, bạn có thể xem tài liệu API tại:
@@ -83,11 +77,11 @@ Sau khi chạy server, bạn có thể xem tài liệu API tại:
    - Key: `Content-Type`, Value: `application/json`.
 4. **Body:**
    - Chọn tab **Body** -> **raw** -> **JSON**.
-   - Nội dung mẫu (không cần field model):
+   - Nội dung mẫu:
      ```json
      {
        "messages": [
-         {"role": "user", "content": "Chào Gemini, bạn có thể giúp tôi build PC không?"}
+         {"role": "user", "content": "Chào AI, bạn có thể giúp tôi build PC không?"}
        ]
      }
      ```
@@ -106,7 +100,7 @@ Sau khi chạy server, bạn có thể xem tài liệu API tại:
 **Response Body:**
 ```json
 {
-  "id": "gemini-response",
+  "id": "fpt-ai-xxx",
   "message": {
     "role": "assistant",
     "content": "Hiện tại chúng tôi đang có sản phẩm Màn hình Dell 24 inch..."
@@ -120,9 +114,9 @@ Sau khi chạy server, bạn có thể xem tài liệu API tại:
     }
   ],
   "usage": {
-    "prompt_tokens": 0,
-    "completion_tokens": 0,
-    "total_tokens": 0
+    "prompt_tokens": 100,
+    "completion_tokens": 50,
+    "total_tokens": 150
   }
 }
 ```

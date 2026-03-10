@@ -3,7 +3,6 @@ uvicorn
 openai
 python-dotenv
 pydantic
-google-generativeai
 httpx
 numpy
 supabase

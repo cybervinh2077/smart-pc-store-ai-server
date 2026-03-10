@@ -7,7 +7,7 @@ from typing import List, Optional
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-import google.generativeai as genai
+from openai import OpenAI
 from dotenv import load_dotenv
 from supabase import create_client, Client
 from markov_predictor import predict_future_prices
@@ -155,47 +155,51 @@ async def periodic_fetch_data():
         await asyncio.sleep(300) 
         await fetch_data_from_supabase()
 
-# Cấu hình Gemini Client
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-if not GEMINI_API_KEY:
-    print("CẢNH BÁO: GEMINI_API_KEY chưa được thiết lập trong file .env")
+# Cấu hình FPT Cloud AI Client (OpenAI-compatible)
+FPT_AI_API_KEY = os.getenv("FPT_AI_API_KEY")
+FPT_AI_BASE_URL = os.getenv("FPT_AI_BASE_URL", "https://mkp-api.fptcloud.com")
+FPT_AI_MODEL = os.getenv("FPT_AI_MODEL", "SaoLa-Llama3.1-planner")
+
+if not FPT_AI_API_KEY:
+    print("CẢNH BÁO: FPT_AI_API_KEY chưa được thiết lập trong file .env")
+    client_ai = None
 else:
     # Làm sạch key
-    GEMINI_API_KEY = GEMINI_API_KEY.strip().strip('"').strip("'")
-    genai.configure(api_key=GEMINI_API_KEY)
-    # In ra 10 ký tự đầu để debug
-    print(f"DEBUG: Đã tải Gemini API Key: {GEMINI_API_KEY[:10]}... (Độ dài: {len(GEMINI_API_KEY)})")
-
-# Cố định model muốn sử dụng
-FIXED_MODEL = "gemini-2.5-flash" 
+    FPT_AI_API_KEY = FPT_AI_API_KEY.strip().strip('"').strip("'")
+    # Sử dụng OpenAI client với base_url của FPT
+    client_ai = OpenAI(
+        api_key=FPT_AI_API_KEY,
+        base_url=f"{FPT_AI_BASE_URL}/v1" if not FPT_AI_BASE_URL.endswith("/v1") else FPT_AI_BASE_URL
+    )
+    print(f"DEBUG: Đã khởi tạo FPT AI Client với Model: {FPT_AI_MODEL}")
 
 # System Prompt để định hình phong cách trả lời
 BASE_SYSTEM_PROMPT = """
-Tôi là người chuyên phân tích và theo dõi giá linh kiện máy tính 💻 — bao gồm CPU 🧠, GPU 🎮, RAM 🔋, SSD ⚡, nguồn, mainboard và các bộ phận phần cứng khác.
-Nhiệm vụ của tôi là cung cấp thông tin chính xác, ngắn gọn và cập nhật, giúp người dùng hiểu rõ giá hiện tại, xu hướng tăng giảm, và sự khác biệt giữa các thương hiệu hoặc thế hệ sản phẩm.
+Tôi là chuyên gia tư vấn và phân tích thị trường linh kiện máy tính 💻. 
+Lĩnh vực chuyên môn của tôi bao gồm: CPU 🧠, GPU (Card màn hình) 🎮, RAM 🔋, SSD/Ổ cứng ⚡, Nguồn (PSU), Bo mạch chủ (Mainboard), Vỏ máy (Case), Tản nhiệt và các phụ kiện máy tính khác.
 
-Tôi chỉ trả lời các câu hỏi liên quan đến giá linh kiện hoặc thị trường công nghệ máy tính.
-Nếu người dùng hỏi ngoài phạm vi này, tôi sẽ phản hồi lịch sự và không có emoji:
-“Cái đó không thuộc lĩnh vực của tôi, nhưng tôi có thể giúp bạn xem giá hoặc xu hướng của linh kiện nào đó.”
+NHIỆM VỤ CỦA TÔI:
+1. Trả lời các câu hỏi về thông số kỹ thuật, so sánh và tư vấn lựa chọn linh kiện.
+2. Gợi ý các sản phẩm cụ thể đang có sẵn tại cửa hàng "Smart PC Store" dựa trên danh sách được cung cấp.
+3. Phân tích xu hướng giá cả linh kiện.
+
+QUY TẮC NHẬN DIỆN LĨNH VỰC:
+- Mọi câu hỏi có chứa các từ khóa về linh kiện (ví dụ: "gợi ý cho tôi các...", "tư vấn bộ máy...", "nên mua card nào...", "CPU nào mạnh...") đều PHẢI được coi là thuộc lĩnh vực của tôi.
+- Chỉ khi người dùng hỏi về các vấn đề HOÀN TOÀN không liên quan đến công nghệ/máy tính (ví dụ: nấu ăn, du lịch, thể thao không liên quan đến e-sports...), tôi mới trả lời: "Cái đó không thuộc lĩnh vực của tôi, nhưng tôi có thể giúp bạn xem giá hoặc xu hướng của linh kiện nào đó." (KHÔNG emoji cho câu này).
 
 ĐẶC BIỆT: Nếu người dùng hỏi cách để "tán" hoặc làm quen với "Đức Anh", hãy trả lời một cách hóm hỉnh rằng: "Đức Anh có bồ rồi, tán làm gì nữa cho mất công!". 
 
-Dữ liệu sản phẩm thực tế:
-Bạn sẽ được cung cấp danh sách sản phẩm hiện có của cửa hàng Smart PC Store dưới dạng JSON. 
-Khi người dùng hỏi về một loại linh kiện nào đó, hãy kiểm tra xem trong danh sách có sản phẩm tương ứng không. 
-Nếu có, hãy gợi ý thêm cho người dùng trong câu trả lời văn bản: "Hiện tại chúng tôi đang có sản phẩm [Tên sản phẩm] với giá [Giá tiền] bạn có thể tham khảo".
+DỮ LIỆU SẢN PHẨM THỰC TẾ:
+Bạn sẽ được cung cấp danh sách sản phẩm "Liên quan" hoặc "Tiêu biểu" từ Smart PC Store dưới dạng JSON. 
+- Nếu tìm thấy sản phẩm phù hợp trong danh sách: Hãy giới thiệu sản phẩm đó trong câu trả lời ("answer") và thêm object sản phẩm vào mảng "suggested_products".
+- Nếu KHÔNG tìm thấy sản phẩm cụ thể nào phù hợp trong danh sách nhưng câu hỏi vẫn thuộc lĩnh vực máy tính: Hãy trả lời tư vấn dựa trên kiến thức chung của bạn và ghi chú rằng: "Hiện tại cửa hàng có thể chưa có sẵn mẫu chính xác này, nhưng tôi có thể tư vấn các dòng tương đương."
 
-QUY ĐỊNH PHẢN HỒI:
-Bạn PHẢI trả về phản hồi dưới định dạng JSON có cấu trúc như sau:
+QUY ĐỊNH PHẢN HỒI JSON (BẮT BUỘC):
+Bạn PHẢI trả về JSON có cấu trúc:
 {
-  "answer": "Câu trả lời văn bản của bạn cho người dùng (KHÔNG chứa khối JSON sản phẩm trong này)",
-  "suggested_products": [Mảng chứa các object JSON sản phẩm đầy đủ mà bạn muốn gợi ý từ danh sách được cung cấp]
+  "answer": "Câu trả lời văn bản chi tiết (KHÔNG chứa emoji, KHÔNG chứa khối JSON sản phẩm)",
+  "suggested_products": [Mảng các object JSON sản phẩm từ danh sách được cung cấp]
 }
-
-Phong cách trả lời:
-- Ngắn gọn, rõ ràng, dễ hiểu.
-- Không sử dụng emoji trong câu trả lời văn bản ("answer").
-- Luôn khách quan, thân thiện và có tính phân tích.
 """
 
 # Model cho dữ liệu đầu vào (JSON)
@@ -219,6 +223,47 @@ class ChatResponse(BaseModel):
     past: Optional[List[dict]] = None   # Lịch sử giá cho dự báo Markov
     future: Optional[List[dict]] = None # Dự báo giá tương lai
     usage: dict
+
+def search_relevant_products(query: str, products: List[dict], limit: int = 20) -> List[dict]:
+    """
+    Tìm kiếm các sản phẩm liên quan dựa trên từ khóa trong câu hỏi của người dùng.
+    Nếu query rỗng hoặc quá ngắn, trả về limit sản phẩm đầu tiên.
+    """
+    if not query or len(query) < 2:
+        return products[:limit]
+
+    # Làm sạch query: chuyển thành chữ thường, tách từ
+    keywords = re.findall(r'\w+', query.lower())
+    if not keywords:
+        return products[:limit]
+
+    scored_products = []
+    for p in products:
+        name = (p.get("productName") or p.get("name") or "").lower()
+        desc = (p.get("description") or "").lower()
+        
+        score = 0
+        for kw in keywords:
+            if kw in name:
+                score += 10 # Ưu tiên khớp tên
+            elif kw in desc:
+                score += 2 # Khớp mô tả
+        
+        if score > 0:
+            scored_products.append((score, p))
+
+    # Sắp xếp theo điểm số giảm dần
+    scored_products.sort(key=lambda x: x[0], reverse=True)
+    
+    # Lấy danh sách sản phẩm
+    results = [p for score, p in scored_products]
+    
+    # Nếu kết quả tìm kiếm quá ít (dưới 5), lấy thêm các sản phẩm khác để AI có context rộng hơn
+    if len(results) < 5:
+        remaining = [p for p in products if p not in results]
+        results.extend(remaining[:limit - len(results)])
+        
+    return results[:limit]
 
 @app.get("/")
 async def root():
@@ -277,64 +322,74 @@ async def chat_endpoint(request: ChatRequest):
                 }
             )
 
-        # Đọc dữ liệu sản phẩm từ file data.json
+        # Đọc dữ liệu sản phẩm từ file data.json và lọc các sản phẩm liên quan
         products_context = ""
         try:
             if os.path.exists(DATA_FILE):
                 with open(DATA_FILE, "r", encoding="utf-8") as f:
                     products_data = json.load(f)
-                    products_context = f"\n\nDANH SÁCH SẢN PHẨM HIỆN CÓ TẠI SMART PC STORE:\n{json.dumps(products_data, ensure_ascii=False, indent=2)}"
+                    
+                    # Lọc tối đa 20 sản phẩm liên quan để tránh quá tải token
+                    relevant_products = search_relevant_products(last_message, products_data, limit=20)
+                    
+                    # Rút gọn thông tin sản phẩm để tiết kiệm token (bỏ qua description dài)
+                    minimized_products = []
+                    for p in relevant_products:
+                        minimized_products.append({
+                            "id": p.get("id"),
+                            "productName": p.get("productName") or p.get("name"),
+                            "currentPrice": p.get("currentPrice"),
+                            "quantity": p.get("quantity")
+                        })
+                        
+                    products_context = f"\n\nDANH SÁCH SẢN PHẨM LIÊN QUAN TẠI SMART PC STORE:\n{json.dumps(minimized_products, ensure_ascii=False, indent=2)}"
         except Exception as e:
-            print(f"WARNING: Không thể đọc file data.json: {e}")
+            print(f"WARNING: Không thể đọc hoặc xử lý file data.json: {e}")
 
         # Kết hợp System Prompt gốc với dữ liệu sản phẩm
         full_system_prompt = BASE_SYSTEM_PROMPT + products_context
 
-        # Chuyển đổi format tin nhắn sang Gemini format
-        # Gemini dùng 'role': 'user' hoặc 'model'
-        history = []
-        for m in request.messages[:-1]:
-            role = "user" if m.role == "user" else "model"
-            history.append({"role": role, "parts": [m.content]})
+        # Chuyển đổi format tin nhắn sang chuẩn OpenAI (FPT hỗ trợ)
+        messages = [{"role": "system", "content": full_system_prompt}]
+        for m in request.messages:
+            messages.append({"role": m.role, "content": m.content})
         
-        last_message = request.messages[-1].content
-        
-        # Sử dụng model cố định và áp dụng System Instruction động
-        # Cấu hình response_mime_type để ép AI trả về JSON
-        model = genai.GenerativeModel(
-            model_name=FIXED_MODEL,
-            system_instruction=full_system_prompt,
-            generation_config={"response_mime_type": "application/json"}
+        if not client_ai:
+            raise HTTPException(status_code=500, detail="FPT AI Client chưa được cấu hình.")
+
+        # Gọi API FPT Cloud AI
+        response = client_ai.chat.completions.create(
+            model=FPT_AI_MODEL,
+            messages=messages,
+            response_format={"type": "json_object"},
+            stream=False
         )
-        
-        # Bắt đầu chat session
-        chat = model.start_chat(history=history)
-        
-        # Gửi tin nhắn
-        response = chat.send_message(last_message)
+
+        # Trích xuất nội dung trả về
+        ai_response_text = response.choices[0].message.content
 
         # Parse kết quả JSON từ AI
         try:
-            ai_data = json.loads(response.text)
-            answer_text = ai_data.get("answer", response.text)
+            ai_data = json.loads(ai_response_text)
+            answer_text = ai_data.get("answer", ai_response_text)
             suggested = ai_data.get("suggested_products", [])
         except Exception as e:
             print(f"WARNING: Không thể parse JSON từ AI: {e}")
-            answer_text = response.text
+            answer_text = ai_response_text
             suggested = []
 
         # Trích xuất dữ liệu trả về
         return ChatResponse(
-            id="gemini-response",
+            id=f"fpt-ai-{response.id}",
             message=Message(
                 role="assistant",
                 content=answer_text
             ),
             suggested_products=suggested,
             usage={
-                "prompt_tokens": 0,
-                "completion_tokens": 0,
-                "total_tokens": 0
+                "prompt_tokens": response.usage.prompt_tokens if response.usage else 0,
+                "completion_tokens": response.usage.completion_tokens if response.usage else 0,
+                "total_tokens": response.usage.total_tokens if response.usage else 0
             }
         )
 
