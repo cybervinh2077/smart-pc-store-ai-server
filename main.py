@@ -267,7 +267,7 @@ def search_relevant_products(query: str, products: List[dict], limit: int = 20) 
 
 @app.get("/")
 async def root():
-    return {"message": "Smart PC Store AI Server is running with Gemini!"}
+    return {"message": f"Smart PC Store AI Server is running on fpt cloud server with the model {FPT_AI_MODEL}"}
 
 @app.post("/forecast")
 async def get_markov_forecast(request: ForecastRequest):
